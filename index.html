@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Postcode Locator</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --pin: #1E4F3D;
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --border: #d8dce2;
+    --text: #1a1d21;
+    --muted: #6b7280;
+    --error: #b3261e;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: flex;
+    flex-direction: column;
+    font: 15px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+  }
+
+  /* ---- top bar ---- */
+  header {
+    flex: none;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px 14px;
+    padding: 12px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  h1 { font-size: 15px; font-weight: 600; margin: 0 6px 0 0; white-space: nowrap; }
+  form { display: flex; gap: 8px; }
+  input[type=text] {
+    width: 140px;
+    padding: 7px 10px;
+    font: inherit;
+    text-transform: uppercase;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: #fff;
+  }
+  input[type=text]:focus { outline: 2px solid #7aa7ff; outline-offset: -1px; }
+  button, select {
+    padding: 7px 12px;
+    font: inherit;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: #fff;
+    cursor: pointer;
+    color: var(--text);
+  }
+  button:disabled { color: #aab; cursor: default; }
+  button[type=submit] { background: var(--pin); color: #fff; border-color: var(--pin); }
+  button[type=submit]:hover { background: #17402f; }
+  .group { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
+  .group label { white-space: nowrap; }
+  .group.right { margin-left: auto; }
+  #asset { max-width: 300px; }
+
+  /* ---- details strip ---- */
+  #status {
+    flex: none;
+    padding: 8px 16px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--muted);
+    min-height: 35px;
+  }
+  #status.error { color: var(--error); }
+  #status dl { display: flex; flex-wrap: wrap; gap: 4px 22px; margin: 0; }
+  #status dt { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  #status dd { margin: 0; color: var(--text); }
+  #status .pair { display: flex; flex-direction: column; }
+  #status ol { margin: 0; padding-left: 20px; columns: 3; column-gap: 28px; }
+  #status ol li { color: var(--text); }
+  #status ol li b { font-weight: 600; }
+
+  /* ---- maps ---- */
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    min-height: 0;
+  }
+  .map-wrap { position: relative; background: #e8eaed; }
+  .map { position: absolute; inset: 0; }
+  .map-toolbar {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 500;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .map-label {
+    padding: 5px 9px;
+    background: rgba(255,255,255,.94);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .copy-btn { padding: 5px 10px; font-size: 12px; background: rgba(255,255,255,.94); }
+  .copy-btn:hover:not(:disabled) { background: #fff; border-color: var(--muted); }
+  .leaflet-container { font: inherit; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Postcode Locator</h1>
+  <form id="lookup" autocomplete="off">
+    <input type="text" id="postcode" placeholder="Add postcode" spellcheck="false" aria-label="Postcode">
+    <button type="submit">Add</button>
+  </form>
+  <div class="group">
+    <label for="asset">Asset</label>
+    <select id="asset"><option value="all">No assets yet</option></select>
+    <button id="remove" title="Remove the selected asset" disabled>Remove</button>
+  </div>
+  <div class="group right">
+    <label for="regional-zoom">Regional</label>
+    <select id="regional-zoom">
+      <option value="9">County</option>
+      <option value="8" selected>Region</option>
+      <option value="7">Wide</option>
+      <option value="6">Nation</option>
+    </select>
+  </div>
+</header>
+
+<div id="status">Add one or more postcodes to place pins.</div>
+
+<main>
+  <div class="map-wrap">
+    <div class="map-toolbar">
+      <span class="map-label">Local</span>
+      <button class="copy-btn" data-map="local" title="Copy this map to the clipboard as an image">Copy</button>
+    </div>
+    <div class="map" id="map-local"></div>
+  </div>
+  <div class="map-wrap">
+    <div class="map-toolbar">
+      <span class="map-label">Regional</span>
+      <button class="copy-btn" data-map="regional" title="Copy this map to the clipboard as an image">Copy</button>
+    </div>
+    <div class="map" id="map-regional"></div>
+  </div>
+</main>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+/* ------------------------------------------------------------------ config */
+
+const PIN_COLOUR = '#1E4F3D';
+const LOCAL_ZOOM = 15;
+const UK_CENTRE = [54.0, -2.5];
+
+/* To change the map's look, edit STYLE below to another key in BASEMAPS.
+   That is the only change needed -- everything else, including the image
+   export, reads from this table.
+
+   Each entry is keyless and sends Access-Control-Allow-Origin, so the exported
+   canvas stays untainted. Only normal map viewing hits these servers -- the
+   export reuses tiles already on screen and fetches nothing. */
+const STYLE = 'osm';
+
+const BASEMAPS = {
+  // The standard OpenStreetMap style: English place names, familiar look.
+  osm: {
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    subdomains: ['a', 'b', 'c'], maxZoom: 19,
+    html: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    plain: '© OpenStreetMap contributors'
+  },
+  // Alternatives, kept ready in case the above is ever unavailable.
+  // Note osmfr renders French exonyms at low zoom ("Londres" for London).
+  esristreet: {
+    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+    subdomains: [], maxZoom: 19,
+    html: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ, USGS',
+    plain: 'Tiles © Esri'
+  },
+  positron: {
+    url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png',
+    subdomains: ['a', 'b', 'c', 'd'], maxZoom: 20,
+    html: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    plain: '© OpenStreetMap contributors, © CARTO'
+  }
+};
+const POSTCODE_ATTRIB = 'Postcode data © ONS & Royal Mail (OGL)';
+
+/* The marker is one path with two subpaths -- the teardrop and an inner circle.
+   Filled with fill-rule "evenodd" the circle becomes a genuine hole, so the
+   map shows through it rather than being covered by a white disc. */
+const PIN_OUTER = 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z';
+const PIN_HOLE = 'M12 6.1a2.9 2.9 0 1 0 0 5.8 2.9 2.9 0 1 0 0-5.8z';
+const PIN_PATH = PIN_OUTER + ' ' + PIN_HOLE;
+const PIN_SCALE = 2.2;
+// Drawing box, widened to leave room for the number badge at the top right.
+const BOX = { x: 4.5, y: -0.5, w: 19, h: 23 };
+const TIP = { x: 12, y: 22 };
+const BADGE = { x: 18.6, y: 4.2, r: 3.9 };
+
+/* -------------------------------------------------------------- map set-up */
+
+function makeMap(id, zoom) {
+  const map = L.map(id, { center: UK_CENTRE, zoom: zoom, zoomControl: false });
+  L.control.zoom({ position: 'topright' }).addTo(map);
+  return map;
+}
+
+const maps = { local: makeMap('map-local', 6), regional: makeMap('map-regional', 6) };
+let layers = {};          // basemap tile layers, per map
+let markers = [];
+let assets = [];          // postcodes.io results, one per asset
+let selected = 'all';     // 'all' or an index into assets
+
+const statusEl = document.getElementById('status');
+const inputEl = document.getElementById('postcode');
+const zoomEl = document.getElementById('regional-zoom');
+const assetEl = document.getElementById('asset');
+const removeEl = document.getElementById('remove');
+
+function currentBasemap() { return BASEMAPS[STYLE]; }
+
+function applyBasemap() {
+  const bm = currentBasemap();
+  Object.keys(maps).forEach(key => {
+    (layers[key] || []).forEach(l => maps[key].removeLayer(l));
+    // crossOrigin is what keeps the exported canvas untainted.
+    const opts = { maxZoom: bm.maxZoom, crossOrigin: 'anonymous',
+                   attribution: bm.html + ' | ' + POSTCODE_ATTRIB };
+    if (bm.subdomains.length) opts.subdomains = bm.subdomains;
+    const stack = [L.tileLayer(bm.url, opts).addTo(maps[key])];
+    if (bm.overlay) stack.push(L.tileLayer(bm.overlay,
+      { maxZoom: bm.maxZoom, crossOrigin: 'anonymous' }).addTo(maps[key]));
+    layers[key] = stack;
+  });
+}
+applyBasemap();
+
+/* ------------------------------------------------------------------ markers */
+
+function pinSvg(label, muted) {
+  const w = BOX.w * PIN_SCALE, h = BOX.h * PIN_SCALE;
+  let s = '<svg width="' + w + '" height="' + h + '"'
+        + ' viewBox="' + BOX.x + ' ' + BOX.y + ' ' + BOX.w + ' ' + BOX.h + '"'
+        + ' xmlns="http://www.w3.org/2000/svg" style="opacity:' + (muted ? 0.4 : 1) + '">'
+        + '<path d="' + PIN_PATH + '" fill="' + PIN_COLOUR + '" fill-rule="evenodd"/>';
+  if (label) {
+    s += '<circle cx="' + BADGE.x + '" cy="' + BADGE.y + '" r="' + BADGE.r + '"'
+       + ' fill="#fff" stroke="' + PIN_COLOUR + '" stroke-width="0.9"/>'
+       + '<text x="' + BADGE.x + '" y="' + BADGE.y + '" fill="' + PIN_COLOUR + '"'
+       + ' font-size="5.2" font-weight="700" text-anchor="middle" dominant-baseline="central"'
+       + ' font-family="-apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif">'
+       + label + '</text>';
+  }
+  return s + '</svg>';
+}
+
+function pinIcon(label, muted) {
+  const w = BOX.w * PIN_SCALE, h = BOX.h * PIN_SCALE;
+  return L.divIcon({
+    className: '',
+    iconSize: [w, h],
+    iconAnchor: [(TIP.x - BOX.x) * PIN_SCALE, (TIP.y - BOX.y) * PIN_SCALE],   // anchor the tip
+    html: pinSvg(label, muted)
+  });
+}
+
+function renderPins() {
+  markers.forEach(m => m.remove());
+  markers = [];
+  const numbered = assets.length > 1;
+  assets.forEach((a, i) => {
+    const muted = selected !== 'all' && selected !== i;
+    Object.keys(maps).forEach(key => {
+      const m = L.marker([a.latitude, a.longitude], {
+        icon: pinIcon(numbered ? String(i + 1) : '', muted),
+        title: a.postcode,
+        zIndexOffset: selected === i ? 1000 : 0
+      }).addTo(maps[key]);
+      m.on('click', () => { selected = i; refresh(); });
+      markers.push(m);
+    });
+  });
+}
+
+/* --------------------------------------------------------------- view logic */
+
+function bounds() { return L.latLngBounds(assets.map(a => [a.latitude, a.longitude])); }
+
+function applyView() {
+  if (!assets.length) return;
+  const regZoom = Number(zoomEl.value);
+
+  // Showing every asset at once, or homing in on one?
+  const wholePortfolio = selected === 'all' && assets.length > 1;
+  const focus = assets[selected === 'all' ? 0 : selected];
+  const centre = wholePortfolio ? bounds().getCenter()
+                                : L.latLng(focus.latitude, focus.longitude);
+
+  // Local frames all the assets, or the one in focus at street level.
+  if (wholePortfolio) maps.local.fitBounds(bounds(), { padding: [45, 45], animate: false });
+  else maps.local.setView(centre, LOCAL_ZOOM, { animate: false });
+
+  // Regional always honours the dropdown, so the control never looks dead.
+  maps.regional.setView(centre, regZoom, { animate: false });
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+}
+
+function renderAssetSelect() {
+  if (!assets.length) {
+    assetEl.innerHTML = '<option value="all">No assets yet</option>';
+    removeEl.disabled = true;
+    return;
+  }
+  let html = '<option value="all">All assets (' + assets.length + ')</option>';
+  assets.forEach((a, i) => {
+    html += '<option value="' + i + '">'
+          + (assets.length > 1 ? (i + 1) + ' · ' : '')
+          + escapeHtml(a.postcode) + ' — ' + escapeHtml(a.admin_district || '')
+          + '</option>';
+  });
+  assetEl.innerHTML = html;
+  assetEl.value = selected === 'all' ? 'all' : String(selected);
+  removeEl.disabled = selected === 'all';
+}
+
+function setStatus(text, isError) {
+  statusEl.className = isError ? 'error' : '';
+  statusEl.textContent = text;
+}
+
+function renderDetails() {
+  if (!assets.length) { setStatus('Add one or more postcodes to place pins.'); return; }
+  statusEl.className = '';
+
+  if (selected === 'all' && assets.length > 1) {
+    statusEl.innerHTML = '<ol>' + assets.map(a =>
+      '<li><b>' + escapeHtml(a.postcode) + '</b> — '
+      + escapeHtml(a.admin_district || '') + ', '
+      + escapeHtml(a.region || a.country || '') + '</li>').join('') + '</ol>';
+    return;
+  }
+
+  const d = selected === 'all' ? assets[0] : assets[selected];
+  const fields = [
+    ['Postcode', d.postcode],
+    ['Coordinates', d.latitude.toFixed(5) + ', ' + d.longitude.toFixed(5)],
+    ['Ward', d.admin_ward],
+    ['District', d.admin_district],
+    ['County', d.admin_county],        // null for metropolitan districts / unitaries
+    ['Region', d.region || d.country],
+    ['Constituency', d.parliamentary_constituency]
+  ];
+  statusEl.innerHTML = '<dl>' + fields.filter(([, v]) => v)
+    .map(([k, v]) => '<div class="pair"><dt>' + k + '</dt><dd>' + escapeHtml(v) + '</dd></div>')
+    .join('') + '</dl>';
+}
+
+function refresh() { renderAssetSelect(); renderPins(); renderDetails(); applyView(); }
+
+/* -------------------------------------------------------------------- lookup */
+
+document.getElementById('lookup').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const raw = inputEl.value.trim();
+  if (!raw) return;
+  const tidy = raw.toUpperCase().replace(/\s+/g, '');
+
+  if (assets.some(a => a.postcode.replace(/\s+/g, '') === tidy)) {
+    setStatus(raw.toUpperCase() + ' is already in the list.', true);
+    return;
+  }
+
+  setStatus('Looking up ' + raw.toUpperCase() + '…');
+  try {
+    const res = await fetch('https://api.postcodes.io/postcodes/' + encodeURIComponent(tidy));
+    if (res.status === 404) {
+      setStatus('No match for "' + raw.toUpperCase() + '". Check the postcode and try again.', true);
+      return;
+    }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+
+    const data = (await res.json()).result;
+    if (!data || data.latitude == null) {
+      setStatus('That postcode exists but has no coordinates on record.', true);
+      return;
+    }
+
+    assets.push(data);
+    selected = assets.length - 1;      // show what was just added
+    inputEl.value = '';
+    refresh();
+  } catch (err) {
+    setStatus('Lookup failed: ' + err.message + '. Check your internet connection.', true);
+  }
+});
+
+assetEl.addEventListener('change', () => {
+  selected = assetEl.value === 'all' ? 'all' : Number(assetEl.value);
+  refresh();
+});
+
+removeEl.addEventListener('click', () => {
+  if (selected === 'all') return;
+  assets.splice(selected, 1);
+  selected = 'all';
+  refresh();
+  if (!assets.length) {
+    maps.local.setView(UK_CENTRE, 6);
+    maps.regional.setView(UK_CENTRE, 6);
+  }
+});
+
+zoomEl.addEventListener('change', applyView);
+
+/* --------------------------------------------------- copy map to clipboard */
+/* The export composites the tiles Leaflet has ALREADY drawn on screen, so it
+   issues no network requests of its own. An earlier version re-fetched tiles
+   at higher zoom for a sharper image, but that is exactly the bulk fetching
+   OpenStreetMap's usage policy forbids, and it got the app blocked. The trade
+   is resolution: output matches the on-screen map size rather than 1800px.
+   Tile layers set crossOrigin so these images are canvas-safe. */
+
+const GAP_TOLERANCE = 0.02;      // fraction of the image allowed to be blank
+const BLANK = [232, 234, 237];   // the #e8eaed backdrop painted before tiles
+
+/* Wait until every visible tile has loaded. Checking only that the tiles
+   currently in the DOM are complete is not enough -- Leaflet creates tile
+   elements lazily, so that passes before the rest even exist. Requiring the
+   tile count to hold steady across consecutive polls closes that gap. */
+async function waitForTiles(map, timeout) {
+  const deadline = performance.now() + (timeout || 6000);
+  let lastCount = -1, settled = 0;
+  while (performance.now() < deadline) {
+    const imgs = [...map.getContainer().querySelectorAll('.leaflet-tile-pane img')];
+    const allLoaded = imgs.length > 0 && imgs.every(i => i.complete && i.naturalWidth > 0);
+    settled = (allLoaded && imgs.length === lastCount) ? settled + 1 : 0;
+    if (settled >= 2) return true;
+    lastCount = imgs.length;
+    await new Promise(r => setTimeout(r, 120));
+  }
+  return false;
+}
+
+// What fraction of the image is still the blank backdrop, i.e. missing tiles.
+function measureGaps(ctx, w, h) {
+  const data = ctx.getImageData(0, 0, w, h).data;
+  let total = 0, blank = 0;
+  for (let y = 0; y < h; y += 16) {
+    for (let x = 0; x < w; x += 16) {
+      const i = (y * w + x) * 4;
+      total++;
+      if (data[i] === BLANK[0] && data[i + 1] === BLANK[1] && data[i + 2] === BLANK[2]) blank++;
+    }
+  }
+  return total ? blank / total : 0;
+}
+
+function drawPin(ctx, x, yTip, scale, label, muted) {
+  ctx.save();
+  ctx.globalAlpha = muted ? 0.4 : 1;
+  ctx.translate(x, yTip);
+  ctx.scale(scale, scale);
+  ctx.translate(-TIP.x, -TIP.y);              // put the path tip on the anchor point
+  ctx.shadowColor = 'rgba(0,0,0,.35)';
+  ctx.shadowBlur = 3;
+  ctx.shadowOffsetY = 1;
+  ctx.fillStyle = PIN_COLOUR;
+  ctx.fill(new Path2D(PIN_PATH), 'evenodd');  // evenodd leaves the centre open
+  ctx.shadowColor = 'transparent';
+  if (label) {
+    ctx.beginPath();
+    ctx.arc(BADGE.x, BADGE.y, BADGE.r, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.lineWidth = 0.9;
+    ctx.strokeStyle = PIN_COLOUR;
+    ctx.stroke();
+    ctx.fillStyle = PIN_COLOUR;
+    ctx.font = '700 5.2px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, BADGE.x, BADGE.y);
+  }
+  ctx.restore();
+}
+
+function drawAttribution(ctx, w, h, text, ss) {
+  const pad = 5 * ss, bh = 15 * ss;
+  ctx.font = (10 * ss) + 'px -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+  const tw = ctx.measureText(text).width;
+  ctx.fillStyle = 'rgba(255,255,255,.8)';
+  ctx.fillRect(w - tw - pad * 2, h - bh, tw + pad * 2, bh);
+  ctx.fillStyle = '#333';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, w - tw - pad, h - bh / 2);
+}
+
+async function captureMap(map) {
+  const bm = currentBasemap();
+  const container = map.getContainer();
+  const w = Math.round(container.getBoundingClientRect().width);
+  const h = Math.round(container.getBoundingClientRect().height);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+
+  let drawn = 0, gaps = 1, tainted = false;
+
+  // Draw, check for holes, and give slow tiles one more chance before settling.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await waitForTiles(map);
+    ctx.fillStyle = '#e8eaed';
+    ctx.fillRect(0, 0, w, h);
+
+    // Reading each tile's bounding box rather than parsing Leaflet's CSS
+    // transforms keeps this correct at any zoom or pan offset.
+    const mapRect = container.getBoundingClientRect();
+    const imgs = [...container.querySelectorAll('.leaflet-tile-pane img')]
+      .filter(img => img.complete && img.naturalWidth > 0);
+    drawn = 0;
+    imgs.forEach(img => {
+      const r = img.getBoundingClientRect();
+      ctx.drawImage(img, r.left - mapRect.left, r.top - mapRect.top, r.width, r.height);
+      drawn++;
+    });
+
+    // A tile served without CORS headers taints the canvas; getImageData throws,
+    // and toBlob would later fail with an opaque SecurityError.
+    try { gaps = measureGaps(ctx, w, h); }
+    catch (err) { tainted = true; break; }
+
+    if (gaps <= GAP_TOLERANCE) break;
+    await new Promise(r => setTimeout(r, 700));
+  }
+
+  const numbered = assets.length > 1;
+  const margin = BOX.h * PIN_SCALE;
+  assets.forEach((a, i) => {
+    const p = map.latLngToContainerPoint([a.latitude, a.longitude]);
+    if (p.x < -margin || p.y < -margin || p.x > w + margin || p.y > h + margin) return;
+    drawPin(ctx, p.x, p.y, PIN_SCALE,
+            numbered ? String(i + 1) : '',
+            selected !== 'all' && selected !== i);
+  });
+
+  drawAttribution(ctx, w, h, bm.plain + ' | ' + POSTCODE_ATTRIB, 1);
+  return { canvas, drawn, gaps, tainted };
+}
+
+function flash(btn, text) {
+  btn.textContent = text;
+  setTimeout(() => { btn.textContent = 'Copy'; }, 1800);
+}
+
+function download(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+document.querySelectorAll('.copy-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    if (!assets.length) { setStatus('Add a postcode before copying a map.', true); return; }
+    const which = btn.dataset.map;
+    btn.disabled = true;
+    btn.textContent = 'Working…';
+    try {
+      const shot = await captureMap(maps[which]);
+      if (shot.tainted) {
+        flash(btn, 'Failed');
+        setStatus('The map image could not be exported because a tile was served without '
+                + 'CORS headers. Reload the page and try again.', true);
+        return;
+      }
+      if (!shot.drawn) {
+        flash(btn, 'Failed');
+        setStatus('No map tiles had finished loading. Wait for the map to draw, then retry.', true);
+        return;
+      }
+      if (shot.gaps > GAP_TOLERANCE) {
+        setStatus('Warning: about ' + Math.round(shot.gaps * 100) + '% of the image is blank '
+                + 'because some tiles had not loaded. Wait for the map to finish drawing, '
+                + 'then copy again.', true);
+      }
+      const blob = await new Promise(r => shot.canvas.toBlob(r, 'image/png'));
+      const tag = selected === 'all' ? 'all-assets' : assets[selected].postcode.replace(/\s+/g, '');
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        flash(btn, 'Copied ✓');
+      } catch (clipErr) {
+        download(blob, 'postcode-' + tag + '-' + which + '.png');   // clipboard blocked
+        flash(btn, 'Saved ↓');
+      }
+    } catch (err) {
+      flash(btn, 'Failed');
+      setStatus('Could not build the image: ' + err.message, true);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+});
+
+inputEl.focus();
+</script>
+</body>
+</html>
