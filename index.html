@@ -432,6 +432,17 @@ removeEl.addEventListener('click', () => {
 
 zoomEl.addEventListener('change', applyView);
 
+/* Leaflet caches its container size. If a map is laid out after init -- a
+   background tab, a pane that resizes, a restored window -- that cache stays
+   stale, and fitBounds against a 0x0 viewport silently returns maxZoom, giving
+   a single tile on a wrongly-zoomed map. Re-measure and re-frame on any resize.
+   This fires once on observe, which also covers the initial-layout case. */
+const sizeWatcher = new ResizeObserver(() => {
+  Object.keys(maps).forEach(k => maps[k].invalidateSize({ animate: false }));
+  applyView();
+});
+Object.keys(maps).forEach(k => sizeWatcher.observe(maps[k].getContainer()));
+
 /* --------------------------------------------------- copy map to clipboard */
 /* The export composites the tiles Leaflet has ALREADY drawn on screen, so it
    issues no network requests of its own. An earlier version re-fetched tiles
@@ -519,6 +530,7 @@ function drawAttribution(ctx, w, h, text, ss) {
 async function captureMap(map) {
   const bm = currentBasemap();
   const container = map.getContainer();
+  map.invalidateSize({ animate: false });   // never export against a stale size
   const w = Math.round(container.getBoundingClientRect().width);
   const h = Math.round(container.getBoundingClientRect().height);
 
